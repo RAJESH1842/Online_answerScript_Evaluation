@@ -1,63 +1,57 @@
-import argparse
-from typing import List
-import numpy as np
-import os
-
 import cv2
-import matplotlib.pyplot as plt
-from pathlib import Path  # ✅ use standard pathlib instead
+import pytesseract
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext
+from pdf2image import convert_from_path
+from PIL import Image
 
-from word_detector import detect, prepare_img, sort_multiline
+# Update this path to where your Tesseract is installed
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
+def run_ocr(file_path):
+    text = ""
+    if file_path.lower().endswith(".pdf"):
+        pages = convert_from_path(file_path, 300)
+        for i, page in enumerate(pages):
+            gray = cv2.cvtColor(cv2.imread(file_path), cv2.COLOR_BGR2GRAY)
+            text += pytesseract.image_to_string(page, config="--psm 6")
+    else:
+        img = cv2.imread(file_path)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        text = pytesseract.image_to_string(gray, config="--psm 6")
+    return text
 
-def get_img_files(data_dir: Path) -> List[Path]:
-    """Return all image files contained in a folder."""
-    res = []
-    for ext in ['*.png', '*.jpg', '*.bmp']:
-        res += list(data_dir.glob(ext))
-    return res
+def open_file():
+    file_path = filedialog.askopenfilename(filetypes=[("Images and PDF", "*.png;*.jpg;*.jpeg;*.pdf")])
+    if not file_path:
+        return
+    result = run_ocr(file_path)
+    text_box.delete(1.0, tk.END)
+    text_box.insert(tk.END, result)
 
+def save_text():
+    text = text_box.get(1.0, tk.END).strip()
+    if not text:
+        messagebox.showwarning("Empty", "No text to save!")
+        return
+    file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+    if file_path:
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        messagebox.showinfo("Saved", f"Text saved to {file_path}")
 
-def main():
-    # Set default data directory to ./samples inside project
-    default_data_dir = Path(os.path.join(os.path.dirname(__file__), "samples"))
+# GUI
+root = tk.Tk()
+root.title("OCR Extractor")
+root.geometry("600x500")
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=Path, default=default_data_dir)
-    parser.add_argument('--kernel_size', type=int, default=25)
-    parser.add_argument('--sigma', type=float, default=11)
-    parser.add_argument('--theta', type=float, default=7)
-    parser.add_argument('--min_area', type=int, default=100)
-    parser.add_argument('--img_height', type=int, default=50)
-    parsed = parser.parse_args()
+btn_open = tk.Button(root, text="📂 Open Image/PDF", command=open_file)
+btn_open.pack(pady=10)
 
-    for fn_img in get_img_files(parsed.data):
-        print(f'Processing file {fn_img}')
+text_box = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=70, height=20)
+text_box.pack(pady=10)
 
-        # load image and process it
-        img = prepare_img(cv2.imread(str(fn_img)), parsed.img_height)
-        detections = detect(img,
-                            kernel_size=parsed.kernel_size,
-                            sigma=parsed.sigma,
-                            theta=parsed.theta,
-                            min_area=parsed.min_area)
+btn_save = tk.Button(root, text="💾 Save as TXT", command=save_text)
+btn_save.pack(pady=10)
 
-        # sort detections: cluster into lines, then sort each line
-        lines = sort_multiline(detections)
-
-        # plot results
-        plt.imshow(img, cmap='gray')
-        num_colors = 7
-        colors = plt.cm.rainbow(np.linspace(0, 1, num_colors))
-        for line_idx, line in enumerate(lines):
-            for word_idx, det in enumerate(line):
-                xs = [det.bbox.x, det.bbox.x, det.bbox.x + det.bbox.w, det.bbox.x + det.bbox.w, det.bbox.x]
-                ys = [det.bbox.y, det.bbox.y + det.bbox.h, det.bbox.y + det.bbox.h, det.bbox.y, det.bbox.y]
-                plt.plot(xs, ys, c=colors(line_idx % num_colors))
-                plt.text(det.bbox.x, det.bbox.y, f'{line_idx}/{word_idx}')
-
-        plt.show()
-
-
-if __name__ == '__main__':
-    main()
+root.mainloop()
